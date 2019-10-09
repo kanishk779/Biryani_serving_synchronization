@@ -4,6 +4,7 @@
 #include<sys/wait.h>
 #include<pthread.h>
 #include<time.h>
+#include<errno.h>
 #define true 1
 #define false 0
 
@@ -66,7 +67,9 @@ void biryani_ready(struct robot * r)
 				all_biryani_served = true;
 				break;
 			}
-			pthread_mutex_lock(&(temp->lock));
+			errno = pthread_mutex_lock(&(temp->lock));
+			if(errno)
+				perror("lock error");
 			// just check the value of semaphore of table
 			if(temp->filled_slots == 0)
 			{
@@ -78,7 +81,10 @@ void biryani_ready(struct robot * r)
 				// is decreasing its own number of biryani, hence it is not a shared variable 
 				r->number_of_biryani--;
 			}
-			pthread_mutex_unlock(&(temp->lock));
+			errno = pthread_mutex_unlock(&(temp->lock));
+			if(errno)
+				perror("lock error");
+			temp = temp->next;
 		}
 		if(all_biryani_served)
 			break;
@@ -113,16 +119,20 @@ void * robots(void * args)
 	while(1)
 	{
 		// come here and start making a random number of biryani
-		int random_biryani = rand()%10;
+		int random_biryani = rand()%10 + 1;
 		// take some time to cook those;
-		int random_time_to_cook = rand()%5;
-		printf("The robot with id %d takes %d time to make %d biryani vessels\n",ro->identifier,random_time_to_cook,random_biryani );
+		int random_time_to_cook = rand()%5 + 1;
 		sleep(random_time_to_cook);
+		printf("The robot with id %d takes %d time to make %d biryani vessels\n",ro->identifier,random_time_to_cook,random_biryani );
 
 		// now increase the available biryani of the respective chef
-		pthread_mutex_lock(&(ro->lock));
+		errno = pthread_mutex_lock(&(ro->lock));
+		if(errno)
+			perror("robot mutex lock");
 		ro->number_of_biryani += random_biryani;
-		pthread_mutex_unlock(&(ro->lock));
+		errno = pthread_mutex_unlock(&(ro->lock));
+		if(errno)
+			perror("robot mutex unlock");
 		//now the robot will only make the batch of biryani when this batch is completely distributed
 
 		// HANDLE THIS CASE the below function will not until all the biryanis are finished
@@ -132,21 +142,37 @@ void * robots(void * args)
 void * students_eat(void * args)
 {
 	// poll all the eating tables whether they have biryani 
-	serving_table *  temp = st.serving_table_head;
+	
 	int had_biryani = false;
 	student* curr_stu = (student *)args;
-	while(temp != NULL)
+	printf("student with id %d created\n",curr_stu->identifier );
+	while(1)
 	{
-		pthread_mutex_lock(&(temp->lock));
-		if(temp->filled_slots > 0)
+		//printf("student with id %d waiting for table\n", curr_stu->identifier);
+		serving_table *  temp = st.serving_table_head;
+		had_biryani = false;
+		while(temp != NULL)
 		{
-			temp->filled_slots--;
-			// the student got a place now
-			had_biryani = true;
-			
-			break;
+			errno = pthread_mutex_lock(&(temp->lock));
+			if(errno)
+				perror("student mutex lock");
+			if(temp->filled_slots > 0)
+			{
+				temp->filled_slots--;
+				// the student got a place now
+				had_biryani = true;
+				errno = pthread_mutex_unlock(&(temp->lock));
+				if(errno)
+					perror("student mutex unlock");
+				break;
+			}
+			errno = pthread_mutex_unlock(&(temp->lock));
+			if(errno)
+				perror("student mutex unlock");
+			temp = temp->next;
 		}
-		pthread_mutex_unlock(&(temp->lock));
+		if(had_biryani)
+			break;
 	}
 	if(had_biryani)
 	{
@@ -157,7 +183,6 @@ void * students_eat(void * args)
 		sleep(random_sleep);
 		curr_stu->apetite = finished;
 		printf("student with id %d had biryani\n",curr_stu->identifier);
-		
 	}
 	return NULL;
 }
@@ -198,6 +223,7 @@ void create_robots()
 	{
 		struct robot * ro = (robot *)malloc(sizeof(robot));
 		ro->identifier = ++robot_id;
+		errno = pthread_mutex_init(&(ro->lock),NULL);
 		if(i == 0)
 		{
 			st.robot_head = ro;
@@ -220,6 +246,9 @@ void create_tables()
 		struct serving_table * table = (serving_table*)malloc(sizeof(serving_table));
 		table->identifier = ++serving_table_id;
 		table->filled_slots = 0;
+		errno = pthread_mutex_init(&(table->lock),NULL);
+		if(errno)
+			perror("mutex init error");
 		if(i == 0)
 		{
 			st.serving_table_head = table;
@@ -230,7 +259,9 @@ void create_tables()
 			temp->next = table;
 			temp = table;
 		}
-		pthread_create(&st.table_threads[i],NULL,&tables,(void *)table); // what should the table do
+		errno = pthread_create(&st.table_threads[i],NULL,&tables,(void *)table); // what should the table do
+		if(errno)
+			perror("create error");
 	}
 }
 int main()
