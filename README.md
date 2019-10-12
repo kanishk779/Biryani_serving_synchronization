@@ -10,6 +10,13 @@
 * The student has to wait for some table to declare that it has empty slots, once the student gets signal he/she grabs a seat on a table.
 
 ## My Implementation
+* I have used six condition variables and one mutex.
+* The condition variable biryani_required is used by robot chef to wait on and is signalled by the table.
+* The condition variable biryani_filled is used by the table to wait on and is signalled by the robot chef.
+* The condition variable slots_taken is signalled by student and the table wait on this.
+* The condition variable slots_available is signalled by the table and the students waits on it.
+* The condition variable start_eating is signalled by the table and is waited upon by the students.
+* The condition variable stop_eating is signalled by the students and the table waits for this event.
 * First take inputs from the user for students , robots, tables.
 * Than create threads for each of the students , robots and tables.
 * The students arrive at random time , this is done by making the students thread sleep for random time before calling its method.
