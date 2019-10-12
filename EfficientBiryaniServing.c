@@ -166,7 +166,7 @@ int wait_for_slot(serving_table ** found_table,int * not_found,student * curr_st
 			errno = pthread_cond_broadcast(&slots_taken);
 			if(errno)
 				perror("signalling table");
-			printf("student with id %d has taken seat on table %d \n",curr_stu->identifier,temp->identifier );
+			
 			return true;
 		}
 		temp = temp->next;
@@ -212,6 +212,7 @@ void * students_eat(void * args)
 	}
 	// now you can eat for some random amount of time
 	int random_sleep = 3 + rand()%10;
+	printf("student with id %d has taken seat on table %d and will eat for %d seconds\n",curr_stu->identifier,found_table->identifier,random_sleep );
 	sleep(random_sleep);
 	printf("student with id %d HAD biryani on table with id %d \n",curr_stu->identifier,found_table->identifier);
 	// now signal the table that you are done with eating
@@ -241,6 +242,8 @@ void create_students()
 			temp->next = stu;
 			temp = stu;
 		}
+		int random_sleep = 1 + rand()%2;
+		sleep(random_sleep);
 		pthread_create(&st->student_threads[i],NULL,&students_eat,(void *)stu);
 	}
 	// wait for all student threads to return after eating
