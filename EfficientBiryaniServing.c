@@ -57,13 +57,16 @@ pthread_cond_t slots_available = PTHREAD_COND_INITIALIZER;
 pthread_cond_t start_eating = PTHREAD_COND_INITIALIZER;
 pthread_cond_t stop_eating = PTHREAD_COND_INITIALIZER;
 serving_table * temp_table;
-int check_empty_table_availbality(robot * ro)
-{
+int biryani_ready(robot * ro)
+{	
+	
 	serving_table * temp = st->serving_table_head;
 	int found = false;
+	pthread_mutex_lock(&mutex);
 	while(temp != NULL)
 	{
 		//printf("robot - %d slots - %d\n",ro->identifier,temp->total_slots_available );
+		
 		if(temp->total_slots_available == 0)
 		{
 			temp->total_slots_available = 5 + rand()%10;
@@ -74,13 +77,68 @@ int check_empty_table_availbality(robot * ro)
 			pthread_cond_broadcast(&biryani_filled);
 			break;	
 		}
+		
 		temp = temp->next;
 	}
+	pthread_mutex_unlock(&mutex);
 	return found;
 }
+void ready_to_serve_table(serving_table ** table)
+{
+		while((*table)->total_slots_available > 0)
+		{
+			// decide a random number of slots from the total_available_slots
+			int random_slot = 1 + rand()%((*table)->total_slots_available);
+			
+			(*table)->total_slots_available -= random_slot;
+			(*table)->slots_currently_available = random_slot;
+			// give signal to students
+			pthread_mutex_lock(&mutex);
+			pthread_cond_broadcast(&slots_available); // students will wait on this condition
+			pthread_mutex_unlock(&mutex);
+			// now wait for the currently_available_slots to become zero;
+			int all_student_took_seat = false;
+			while(!all_student_took_seat)
+			{
+				pthread_mutex_lock(&mutex);
+				while((*table)->slots_currently_available!=0 && st->student_finished_eating!=st->total_students)
+				{
+					errno = pthread_cond_wait(&slots_taken,&mutex); // student will signal slot taken
+					if(errno)
+						perror("student took seat");
+				}
+				if((*table)->slots_currently_available > 0)
+					random_slot = random_slot - (*table)->slots_currently_available;
+				all_student_took_seat = true;
+				pthread_mutex_unlock(&mutex);
+			}
+			// now give signal to start eating to students
+			pthread_mutex_lock(&mutex);
+			(*table)->can_start_eating = true;
+			pthread_cond_broadcast(&start_eating);// students will wait on start eating
+			pthread_mutex_unlock(&mutex);
+
+			//check for the condition when all students had biryani
+			int all_student_had_biryani = false;
+			while(!all_student_had_biryani)
+			{
+				pthread_mutex_lock(&mutex);
+				while((*table)->student_who_ate != random_slot)
+				{
+					errno = pthread_cond_wait(&stop_eating,&mutex); // DO
+					if(errno)
+					perror("students ate biryani");
+				}
+				all_student_had_biryani = true;
+				(*table)->can_start_eating = false;
+				(*table)->student_who_ate = 0;
+				pthread_mutex_unlock(&mutex);
+			}
+		}
+}
+
 void * robots(void * args)
 {
-	pthread_mutex_lock(&mutex);
 	struct robot * ro = (robot *)args;
 	int random_sleep = 2 + rand()%4;
 	int random_vessel = 1 + rand()%10;
@@ -94,15 +152,18 @@ void * robots(void * args)
 		
 		while(ro->number_of_biryani > 0)
 		{
-			
-			int res = check_empty_table_availbality(ro);
+			//printf("ro->number_of_biryani %d robot %d,OUT\n",ro->number_of_biryani,ro->identifier );
+			int res = biryani_ready(ro);
 			while(!res)
 			{
+				//printf("ro->number_of_biryani %d robot %d,IN\n",ro->number_of_biryani,ro->identifier );
+				pthread_mutex_lock(&mutex);
 				errno = pthread_cond_wait(&biryani_required,&mutex); // the table will signal that it requires biryani
-				printf("request rec for robot %d\n",ro->identifier );
+				//printf("request rec for robot %d\n",ro->identifier );
 				if(errno)
 					perror("robot is making biryani");
-				res = check_empty_table_availbality(ro);
+				pthread_mutex_unlock(&mutex);
+				res = biryani_ready(ro);
 			}
 			
 		}
@@ -113,7 +174,7 @@ void * robots(void * args)
 		ro->number_of_biryani = random_vessel;
 		
 	}
-	pthread_mutex_unlock(&mutex);
+	//pthread_mutex_unlock(&mutex);
 }
 void * tables(void * args)
 {
@@ -124,7 +185,6 @@ void * tables(void * args)
 	{
 		pthread_mutex_lock(&mutex);
 		int biryani_obtained = false;
-		robot * robo_filled_vessel;
 		pthread_cond_signal(&biryani_required);
 		table->want_biryani = true; // signalling on biryani required
 		pthread_mutex_unlock(&mutex);
@@ -143,63 +203,13 @@ void * tables(void * args)
 			pthread_mutex_unlock(&mutex);
 		}
 		// now the slots are filled so start distributing the biryani
-		while(table->total_slots_available > 0)
-		{
-			// decide a random number of slots from the total_available_slots
-			int random_slot = 1 + rand()%(table->total_slots_available);
-			
-			table->total_slots_available -= random_slot;
-			table->slots_currently_available = random_slot;
-			// give signal to students
-			pthread_mutex_lock(&mutex);
-			pthread_cond_broadcast(&slots_available); // students will wait on this condition
-			pthread_mutex_unlock(&mutex);
-			// now wait for the currently_available_slots to become zero;
-			int all_student_took_seat = false;
-			while(!all_student_took_seat)
-			{
-				pthread_mutex_lock(&mutex);
-				while(table->slots_currently_available!=0 && st->student_finished_eating!=st->total_students)
-				{
-					errno = pthread_cond_wait(&slots_taken,&mutex); // student will signal slot taken
-					if(errno)
-						perror("student took seat");
-				}
-				if(table->slots_currently_available > 0)
-					random_slot = random_slot - table->slots_currently_available;
-				all_student_took_seat = true;
-				pthread_mutex_unlock(&mutex);
-			}
-			// now give signal to start eating to students
-			pthread_mutex_lock(&mutex);
-			table->can_start_eating = true;
-			pthread_cond_broadcast(&start_eating);// students will wait on start eating
-			pthread_mutex_unlock(&mutex);
-
-			//check for the condition when all students had biryani
-			int all_student_had_biryani = false;
-			while(!all_student_had_biryani)
-			{
-				pthread_mutex_lock(&mutex);
-				while(table->student_who_ate != random_slot)
-				{
-					errno = pthread_cond_wait(&stop_eating,&mutex); // DO
-					if(errno)
-					perror("students ate biryani");
-				}
-				all_student_had_biryani = true;
-				table->can_start_eating = false;
-				table->student_who_ate = 0;
-				pthread_mutex_unlock(&mutex);
-			}
-			
-		}
+		ready_to_serve_table(&table);
 		pthread_mutex_unlock(&mutex);
 	}
 	return NULL;
 }
 
-int check_table_found(serving_table ** found_table,int * not_found,student * curr_stu)
+int wait_for_slot(serving_table ** found_table,int * not_found,student * curr_stu)
 {
 	serving_table * temp = st->serving_table_head;
 	while(temp != NULL)
@@ -221,6 +231,15 @@ int check_table_found(serving_table ** found_table,int * not_found,student * cur
 	}
 	return false;
 }
+void student_in_slot(serving_table * found_table)
+{
+	while(found_table->can_start_eating == false)
+	{
+		errno = pthread_cond_wait(&start_eating,&mutex); // waiting on start eating
+		if(errno) // DO
+			perror("found_biryani wait for eating");
+	}
+}
 void * students_eat(void * args)
 {
 	// here the student will have to wait for the signal given by the table
@@ -231,7 +250,7 @@ void * students_eat(void * args)
 	while(not_found)
 	{
 		pthread_mutex_lock(&mutex);
-		while(!check_table_found(&found_table,&not_found,curr_stu))
+		while(!wait_for_slot(&found_table,&not_found,curr_stu))
 		{
 			errno = pthread_cond_wait(&slots_available,&mutex); 
 			if(errno)
@@ -244,12 +263,7 @@ void * students_eat(void * args)
 	while(!invited_to_eat)
 	{
 		pthread_mutex_lock(&mutex);
-		while(found_table->can_start_eating == false)
-		{
-			errno = pthread_cond_wait(&start_eating,&mutex); // waiting on start eating
-			if(errno) // DO
-				perror("found_biryani wait for eating");
-		}
+		student_in_slot(found_table);
 		printf("student with id %d has started eating on table %d \n",curr_stu->identifier,found_table->identifier );
 		invited_to_eat = true;
 		pthread_mutex_unlock(&mutex);
@@ -362,11 +376,5 @@ int main()
 	create_robots();
 	create_tables();
 	create_students();
-	serving_table * temp = st->serving_table_head;
-	while(temp != NULL)
-	{
-		printf("table id %d total slots %d\n",temp->identifier,temp->total_slots_available );
-		temp = temp->next;
-	}
 	return 0;
 }
