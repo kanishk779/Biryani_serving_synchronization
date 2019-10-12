@@ -1,0 +1,6 @@
+output: EfficientBiryaniServing.o
+	gcc EfficientBiryaniServing.o -o output
+EfficientBiryaniServing.o: EfficientBiryaniServing.c EfficientBiryaniServing.h 
+			gcc -c EfficientBiryaniServing.c
+clean:
+	rm output *.o
